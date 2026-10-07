@@ -1,0 +1,164 @@
+/* 离线工具箱 —— 共享样式
+   要点：viewport-fit=cover 之后，顶部/底部都要靠 env(safe-area-inset-*) 把内容让开，
+   底部 Tab 栏自己吃掉 inset，正文再躲开 Tab 栏高度。这是只有装成 App 才看得出差别的地方。 */
+
+:root{
+  --bg:#0b1120;
+  --bg2:#0e1526;
+  --card:#151d2e;
+  --card2:#1c2739;
+  --line:#26324a;
+  --fg:#e9efff;
+  --dim:#8fa0be;
+  --accent:#4c8dff;
+  --accent-dim:#2b4f8f;
+  --ok:#39d98a;
+  --warn:#ffb020;
+  --bad:#ff6b6b;
+  --tabh:56px;
+  --pad:16px;
+  --r:14px;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px;
+  line-height:1.5;
+  -webkit-text-size-adjust:100%;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior-y:none;
+  padding-bottom:calc(var(--tabh) + env(safe-area-inset-bottom,0px) + 12px);
+}
+
+/* ---------- 顶部标题 ---------- */
+.hd{
+  position:sticky;top:0;z-index:20;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) var(--pad) 10px;
+  background:linear-gradient(180deg,rgba(11,17,32,.97),rgba(11,17,32,.86));
+  -webkit-backdrop-filter:saturate(180%) blur(14px);
+  backdrop-filter:saturate(180%) blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.hd h1{margin:0;font-size:19px;font-weight:650;letter-spacing:.2px}
+.hd p{margin:2px 0 0;font-size:12.5px;color:var(--dim)}
+
+/* ---------- 主体 ---------- */
+main{padding:var(--pad)}
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  padding:14px;
+  margin:0 0 14px;
+}
+.card h2{
+  margin:0 0 12px;font-size:14px;font-weight:600;color:var(--dim);
+  letter-spacing:.4px;text-transform:none;
+}
+
+/* ---------- 表单 ---------- */
+.field{margin:0 0 12px}
+.field:last-child{margin-bottom:0}
+.field label{display:block;font-size:13px;color:var(--dim);margin:0 0 6px}
+.field .hint{font-size:12px;color:var(--dim);margin:6px 0 0;line-height:1.45}
+.row{display:flex;align-items:center;gap:10px}
+.row .field{flex:1;margin:0}
+.unit-tag{font-size:13px;color:var(--dim);min-width:34px;text-align:right}
+
+input[type=number],input[type=date],input[type=text],select{
+  width:100%;
+  background:var(--card2);
+  border:1px solid var(--line);
+  border-radius:10px;
+  color:var(--fg);
+  font-size:17px;
+  font-family:inherit;
+  padding:11px 12px;
+  outline:none;
+  -webkit-appearance:none;appearance:none;
+}
+input:focus,select:focus{border-color:var(--accent)}
+input::placeholder{color:#5d6b86}
+select{
+  background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;
+  background-size:5px 5px,5px 5px;
+  background-repeat:no-repeat;
+  padding-right:34px;
+}
+
+/* iOS 上日期框要去掉原生外观，否则宽度撑不满、文字居中 */
+input[type=date]{
+  appearance:none;-webkit-appearance:none;
+  text-align:left;min-height:45px;
+  display:flex;align-items:center;
+}
+input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
+input[type=date]::-webkit-calendar-picker-indicator{opacity:.55;filter:invert(1)}
+
+/* 分段控件 */
+.seg{display:flex;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
+.seg button{
+  flex:1;border:0;background:transparent;color:var(--dim);
+  font-size:14px;font-family:inherit;padding:8px 4px;border-radius:8px;
+  transition:background .15s,color .15s;
+}
+.seg button[aria-pressed=true]{background:var(--accent);color:#fff;font-weight:600}
+
+/* ---------- 结果展示 ---------- */
+.big{display:flex;align-items:baseline;gap:8px;margin:0 0 4px}
+.big b{font-size:30px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.big span{font-size:13px;color:var(--dim)}
+.num{font-variant-numeric:tabular-nums}
+
+.rows{margin:0}
+.rows div{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--line);
+}
+.rows div:last-child{border-bottom:0}
+.rows dt{color:var(--dim);font-size:14px;margin:0}
+.rows dd{margin:0;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.rows dd.ok{color:var(--ok)}
+.rows dd.warn{color:var(--warn)}
+.rows dd.bad{color:var(--bad)}
+.rows dd.accent{color:var(--accent)}
+
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--dim);font-weight:500;font-size:12px}
+th:first-child,td:first-child{text-align:left}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px}
+
+.note{font-size:12.5px;color:var(--dim);line-height:1.6;margin:10px 0 0}
+.pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--dim);border:1px solid var(--line)}
+.btn{
+  width:100%;border:0;border-radius:11px;background:var(--accent);color:#fff;
+  font-family:inherit;font-size:16px;font-weight:600;padding:13px;margin-top:4px;
+}
+.btn.ghost{background:var(--card2);color:var(--fg);border:1px solid var(--line);font-weight:500;font-size:14px;padding:10px}
+.btn:active{opacity:.8}
+
+/* ---------- 底部 Tab ---------- */
+.tabbar{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  display:flex;
+  height:calc(var(--tabh) + env(safe-area-inset-bottom,0px));
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  background:rgba(14,21,38,.96);
+  -webkit-backdrop-filter:saturate(180%) blur(16px);
+  backdrop-filter:saturate(180%) blur(16px);
+  border-top:1px solid var(--line);
+}
+.tabbar a{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  color:var(--dim);text-decoration:none;font-size:11px;padding-top:6px;
+}
+.tabbar a svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar a[aria-current=page]{color:var(--accent)}
+.tabbar a:active{opacity:.7}
