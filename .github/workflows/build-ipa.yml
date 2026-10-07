@@ -1,0 +1,139 @@
+name: Build unsigned IPA (离线工具箱 H5 外壳)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: xcodebuild -> unsigned .ipa (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-15, macos-14 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      # ---------- H5 资源自检 ----------
+      # 资源已由本地 sync_h5.ps1 同步进 Toolbox/WebApp（排除 *.bak/*.orig/_selfcheck/tools，
+      # 与 Android 构建脚本 run_build.cmd 的排除规则一致）。这里只做校验，不改内容。
+      - name: Verify H5 assets
+        run: |
+          set -euo pipefail
+          DST="Toolbox/WebApp"
+          test -d "$DST" || { echo "::error::找不到 $DST，请先用 h5toipa.py 生成工程"; exit 1; }
+
+          echo "--- 关键文件 ---"
+          for f in index.html \
+                   salary.html \
+                   date.html \
+                   unit.html ; do
+            if [ -f "$DST/$f" ]; then
+              printf '  OK   %-24s %8s B\n' "$f" "$(wc -c < "$DST/$f" | tr -d ' ')"
+            else
+              echo "::error::缺 $f"; exit 1
+            fi
+          done
+
+          echo "--- 资源统计 ---"
+          printf '  html : %s 个\n' "$(find "$DST" -name '*.html' | wc -l | tr -d ' ')"
+          printf '  js   : %s 个\n' "$(find "$DST" -name '*.js' | wc -l | tr -d ' ')"
+          printf '  css  : %s 个\n' "$(find "$DST" -name '*.css' | wc -l | tr -d ' ')"
+          printf '  png  : %s 个\n' "$(find "$DST" -name '*.png' | wc -l | tr -d ' ')"
+          printf '  jpg  : %s 个\n' "$(find "$DST" -name '*.jpg' | wc -l | tr -d ' ')"
+          printf '  合计 : %s 个文件, %s\n' \
+            "$(find "$DST" -type f | wc -l | tr -d ' ')" "$(du -sh "$DST" | cut -f1)"
+
+          echo "--- 排除项确认（应为 0）---"
+          printf '  残留 .bak/.orig : %s\n' "$(find "$DST" \( -name '*.bak' -o -name '*.orig' \) | wc -l | tr -d ' ')"
+
+          # 关键：确认 local_api.js 的 fetch 拦截还在（"完全离线"的基础）
+
+      - name: Clean
+        run: |
+          xcodebuild -project Toolbox.xcodeproj -scheme Toolbox clean
+
+      - name: Archive (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Toolbox.xcodeproj \
+            -scheme Toolbox \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Toolbox.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            archive
+
+      - name: Package .ipa (Payload folder, unsigned)
+        run: |
+          set -euo pipefail
+          ARCH="$RUNNER_TEMP/Toolbox.xcarchive/Products/Applications"
+          echo "--- archive 产物 ---"
+          ls -la "$ARCH"
+          APP=$(find "$ARCH" -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP" || { echo "::error::archive 里找不到 .app"; exit 1; }
+          echo "APP = $APP"
+
+          # 断言 H5 资源确实进包了（folder reference 有没有生效）
+          test -f "$APP/WebApp/index.html" || { echo "::error::WebApp 没有进包（folder reference 失效）"; exit 1; }
+          printf '包内 WebApp 文件数: %s\n' "$(find "$APP/WebApp" -type f | wc -l | tr -d ' ')"
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+
+          APPNAME=$(basename "$APP")
+          echo "--- 未签名校验 ---"
+          ls "$RUNNER_TEMP/ipa/Payload/$APPNAME/_CodeSignature" 2>/dev/null \
+            && echo "::warning::存在 _CodeSignature" \
+            || echo "OK: 无 _CodeSignature（未签名）"
+
+          cd "$RUNNER_TEMP/ipa"
+          # 用 Python 的 zipfile 打包，而不是 `zip` 命令：zipfile 对非 ASCII 文件名会正确
+          # 置 UTF-8（EFS）标志位；macOS 自带的 Info-ZIP `zip` 会把 UTF-8 字节写成不带标志
+          # 的形式，解压端按 cp437 解出乱码文件名（Windows 资源管理器、部分 iPhone 解包 App
+          # 都会中招），页面里引用中文名资源就会 404。
+          #   （写成单行 Python，多行 here-doc 会被 YAML 缩进规则搞坏）
+          python3 -c "import os,zipfile,sys;ds=[(r,[os.path.join(r,d) for d in sorted(x)],[os.path.join(r,f) for f in sorted(y)]) for r,x,y in os.walk('Payload')];z=zipfile.ZipFile('toolbox-ios-unsigned.ipa','w',zipfile.ZIP_DEFLATED,compresslevel=9);z.writestr('Payload/',b'');[tuple([z.writestr(p+'/',b'') for p in d]+[z.write(p,p.replace(os.sep,'/')) for p in f]) for r,d,f in ds];z.close();sys.exit(0)"
+          ls -lh toolbox-ios-unsigned.ipa
+          echo "--- 非 ASCII 文件名的 UTF-8 标志位 ---"
+          python3 -c "import zipfile;na=[i for i in zipfile.ZipFile('toolbox-ios-unsigned.ipa').infolist() if any(ord(c)>127 for c in i.filename)];bad=[i.filename for i in na if not (i.flag_bits & 0x800)];print('  非 ASCII 条目 %d 个，缺 UTF-8 标志 %d 个' % (len(na),len(bad)));print('\n'.join('   ::warning::缺 UTF-8 标志: '+b for b in bad))"
+          echo "IPA_PATH=$RUNNER_TEMP/ipa/toolbox-ios-unsigned.ipa" >> "$GITHUB_ENV"
+          echo "APP_NAME=$APPNAME" >> "$GITHUB_ENV"
+
+      - name: Verify ipa
+        run: |
+          set -euo pipefail
+          unzip -l "$IPA_PATH" | head -20
+          unzip -p "$IPA_PATH" "Payload/$APP_NAME/Info.plist" > /tmp/plist.bin
+          plutil -p /tmp/plist.bin | head -40
+          BID=$(plutil -extract CFBundleIdentifier raw /tmp/plist.bin)
+          NAME=$(plutil -extract CFBundleDisplayName raw /tmp/plist.bin)
+          MIN=$(plutil -extract MinimumOSVersion raw /tmp/plist.bin)
+          echo "### Bundle ID: \`$BID\`  名称: \`$NAME\`  最低系统: \`$MIN\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 包内 WebApp 文件数: \`$(unzip -l "$IPA_PATH" | grep -c 'Payload/.*/WebApp/')\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolbox-ios-unsigned-${{ matrix.os }}
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+          retention-days: 30
