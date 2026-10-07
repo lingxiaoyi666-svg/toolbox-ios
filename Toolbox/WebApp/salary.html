@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="离线工具箱">
+<meta name="theme-color" content="#0b1120">
+<title>工资到手 · 离线工具箱</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="hd">
+  <h1>工资到手</h1>
+  <p>累计预扣法 · 五险一金可调</p>
+</header>
+
+<main id="app">
+
+  <section class="card">
+    <h2>收入与扣除</h2>
+
+    <div class="field">
+      <label>税前月薪</label>
+      <div class="row">
+        <input type="number" inputmode="decimal" data-k="gross" value="20000" min="0" step="500">
+        <span class="unit-tag">元</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>五险一金缴纳基数<em style="color:#5d6b86;font-style:normal">（留空 = 按税前月薪）</em></label>
+      <div class="row">
+        <input type="number" inputmode="decimal" data-k="base" value="" placeholder="默认同税前" min="0" step="500">
+        <span class="unit-tag">元</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>专项附加扣除（每月）</label>
+      <div class="row">
+        <input type="number" inputmode="decimal" data-k="extra" value="0" min="0" step="500">
+        <span class="unit-tag">元</span>
+      </div>
+      <p class="hint">子女教育 2000 / 继续教育 400 / 住房贷款利息 1000 / 住房租金 1500 / 赡养老人 3000 / 婴幼儿照护 2000 —— 填每月合计。</p>
+    </div>
+
+    <div class="row" style="margin-bottom:12px">
+      <div class="field">
+        <label>养老</label>
+        <div class="row"><input type="number" inputmode="decimal" data-k="yanglao" value="8" min="0" step="0.5"><span class="unit-tag">%</span></div>
+      </div>
+      <div class="field">
+        <label>医疗</label>
+        <div class="row"><input type="number" inputmode="decimal" data-k="yiliao" value="2" min="0" step="0.5"><span class="unit-tag">%</span></div>
+      </div>
+      <div class="field">
+        <label>失业</label>
+        <div class="row"><input type="number" inputmode="decimal" data-k="shiye" value="0.5" min="0" step="0.1"><span class="unit-tag">%</span></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>住房公积金（个人）</label>
+      <div class="row">
+        <input type="number" inputmode="decimal" data-k="gjj" value="12" min="0" max="24" step="1">
+        <span class="unit-tag">%</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>每月到手</h2>
+    <div class="big"><b class="num" id="o-net">—</b><span>元 / 月（年度平均）</span></div>
+    <dl class="rows" id="o-rows"></dl>
+  </section>
+
+  <section class="card">
+    <h2>逐月个税（累计预扣法）</h2>
+    <div class="scrollx">
+      <table>
+        <thead><tr><th>月</th><th>累计应税</th><th>当月个税</th><th>当月到手</th></tr></thead>
+        <tbody id="o-months"></tbody>
+      </table>
+    </div>
+    <p class="note">累计预扣法下，年内前面月份按低档预扣、随累计所得升高逐档上升，所以同样月薪「越到年底税越多、到手越少」。全年合计才是真实税负。</p>
+  </section>
+
+  <section class="card">
+    <h2>税率表（累计预扣）</h2>
+    <div class="scrollx">
+      <table>
+        <thead><tr><th>累计应纳税所得额</th><th>税率</th><th>速算扣除数</th></tr></thead>
+        <tbody>
+          <tr><td>≤ 36,000</td><td>3%</td><td>0</td></tr>
+          <tr><td>36,000 – 144,000</td><td>10%</td><td>2,520</td></tr>
+          <tr><td>144,000 – 300,000</td><td>20%</td><td>16,920</td></tr>
+          <tr><td>300,000 – 420,000</td><td>25%</td><td>31,920</td></tr>
+          <tr><td>420,000 – 660,000</td><td>30%</td><td>52,920</td></tr>
+          <tr><td>660,000 – 960,000</td><td>35%</td><td>85,920</td></tr>
+          <tr><td>&gt; 960,000</td><td>45%</td><td>181,920</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">起征点 5,000 元/月（全年 60,000）。公式：本月个税 = 累计应税 × 税率 − 速算扣除数 − 本年已预扣。</p>
+  </section>
+
+</main>
+
+<nav class="tabbar">
+  <a href="index.html">
+    <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M10 21v-6h4v6"/></svg>
+    <span>房贷</span>
+  </a>
+  <a href="salary.html" aria-current="page">
+    <svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="13" rx="2.5"/><path d="M2.5 10.5h19"/><circle cx="12" cy="14.6" r="1.9"/></svg>
+    <span>工资</span>
+  </a>
+  <a href="date.html">
+    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+    <span>日期</span>
+  </a>
+  <a href="unit.html">
+    <svg viewBox="0 0 24 24"><path d="M3.5 8.5h14l-3.2-3.2M20.5 15.5h-14l3.2 3.2"/></svg>
+    <span>换算</span>
+  </a>
+</nav>
+
+<script src="js/app.js"></script>
+<script src="js/salary.js"></script>
+</body>
+</html>
