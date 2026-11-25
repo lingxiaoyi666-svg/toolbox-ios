@@ -65,6 +65,9 @@ class AppListViewController: UIViewController {
 
     @objc func refresh() {
         updateThrottle.throttle {
+            // 刷新 = 重新开始：忘掉上一次处理过的 App Store 链接，
+            // 别让点了刷新还在弹之前那个 App 的提示
+            AppStoreLinkSession.skipCurrent()
             self.reloadAppListFromSource()
         }
     }

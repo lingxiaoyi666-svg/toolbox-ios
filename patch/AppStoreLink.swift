@@ -132,57 +132,35 @@ final class AppStoreLink {
     }
 }
 
-// MARK: - 装完自动砸壳的等待器
+// MARK: - 一次只处理一个链接
 
-final class AppStoreInstallWatcher: NSObject {
-    static let shared = AppStoreInstallWatcher()
+/// 点刷新、或者换了一条新链接之后，上一次的状态必须能清干净，
+/// 否则会一直弹上一次复制过的那个 App。
+enum AppStoreLinkSession {
+    /// 上一次解析过的链接原文：同一条链接不再自动解析，避免反复打扰
+    static var lastHandledLink: String?
+    /// 上一次解析出的 App 名字，只用来做提示文案
+    static var lastHandledName: String?
 
-    private var timer: DispatchSourceTimer?
-    private var meta: AppStoreLookupResult?
-    private var onReady: (([AppListElement], AppListElement) -> Void)?
-
-    var isWatching: Bool { meta != nil }
-
-    func watch(_ meta: AppStoreLookupResult, onReady: @escaping ([AppListElement], AppListElement) -> Void) {
-        stop()
-        self.meta = meta
-        self.onReady = onReady
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(tick),
-            name: UIApplication.didBecomeActiveNotification,
-            object: nil
-        )
-
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 3, repeating: 3, leeway: .seconds(1))
-        timer.setEventHandler { [weak self] in self?.tick() }
-        timer.resume()
-        self.timer = timer
+    static func markHandled(link: String, name: String) {
+        lastHandledLink = link
+        lastHandledName = name
     }
 
-    func stop() {
-        timer?.cancel()
-        timer = nil
-        meta = nil
-        onReady = nil
-        NotificationCenter.default.removeObserver(
-            self,
-            name: UIApplication.didBecomeActiveNotification,
-            object: nil
-        )
+    /// 用户说「不砸这个了」：保留去重用的链接，只清掉名字，
+    /// 这样剪贴板里还是老链接时不会又被自动解析一遍。
+    static func skipCurrent() {
+        lastHandledName = nil
     }
 
-    @objc private func tick() {
-        guard let meta = meta else { return }
-        let apps = Agent.shared.generateAppList()
-        guard let app = apps.first(where: {
-            $0.bundleIdentifier.caseInsensitiveCompare(meta.bundleId) == .orderedSame
-        }) else { return }
-        let completion = onReady
-        stop()
-        DispatchQueue.main.async { completion?(apps, app) }
+    static func reset() {
+        lastHandledLink = nil
+        lastHandledName = nil
+    }
+
+    static func isSameAsLast(_ text: String) -> Bool {
+        guard let last = lastHandledLink else { return false }
+        return last == text
     }
 }
 
@@ -200,14 +178,21 @@ extension AppListViewController {
     }
 
     @objc func promptForAppStoreLink() {
-        let pasteboardText = UIPasteboard.general.string ?? ""
-        if AppStoreLink.shared.trackId(from: pasteboardText) != nil {
+        let pasteboardText = (UIPasteboard.general.string ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 剪贴板里是链接、且不是上次刚处理过的那一条，才直接开砸。
+        // 还是老链接就走输入框，免得用户以为点了没反应，或者被旧 App 反复打扰。
+        if AppStoreLink.shared.trackId(from: pasteboardText) != nil,
+           !AppStoreLinkSession.isSameAsLast(pasteboardText)
+        {
             resolveAndDecrypt(text: pasteboardText)
             return
         }
+
         let alert = UIAlertController(
             title: "App Store 链接",
-            message: "粘贴 apps.apple.com/.../id123456789，直接输入数字 ID 也行",
+            message: promptMessage(),
             preferredStyle: .alert
         )
         alert.addTextField { field in
@@ -218,14 +203,34 @@ extension AppListViewController {
         }
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "砸壳", style: .default) { [weak self, weak alert] _ in
-            self?.resolveAndDecrypt(text: alert?.textFields?.first?.text ?? "")
+            let text = alert?.textFields?.first?.text ?? ""
+            self?.resolveAndDecrypt(text: text)
         })
-        present(alert, animated: true)
+        presentOnTop(alert)
+    }
+
+    private func promptMessage() -> String {
+        if let name = AppStoreLinkSession.lastHandledName {
+            return "上次处理的是「\(name)」。换一个 App 就粘贴新的链接，直接输入数字 ID 也行。"
+        }
+        return "粘贴 apps.apple.com/.../id123456789，直接输入数字 ID 也行"
+    }
+
+    /// 已经有一个 alert 在前台时再 present 会静默失败，先收掉旧的
+    private func presentOnTop(_ controller: UIViewController) {
+        if let presented = presentedViewController {
+            presented.dismiss(animated: false) { [weak self] in
+                self?.present(controller, animated: true)
+            }
+        } else {
+            present(controller, animated: true)
+        }
     }
 
     func resolveAndDecrypt(text: String) {
-        guard let trackId = AppStoreLink.shared.trackId(from: text) else {
-            SPIndicator.present(title: "解析失败", message: "没有 /id 数字", preset: .error)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trackId = AppStoreLink.shared.trackId(from: trimmed) else {
+            SPIndicator.present(title: "解析失败", message: "没找到 /id 后面的数字", preset: .error)
             return
         }
         AppStoreLink.shared.lookup(trackId: trackId) { [weak self] result in
@@ -234,6 +239,7 @@ extension AppListViewController {
             case .failure(let error):
                 SPIndicator.present(title: "查询失败", message: error.localizedDescription, preset: .error)
             case .success(let meta):
+                AppStoreLinkSession.markHandled(link: trimmed, name: meta.trackName)
                 self.matchOrAskInstall(meta)
             }
         }
@@ -244,7 +250,7 @@ extension AppListViewController {
             startDecrypt(app)
             return
         }
-        // 列表可能是旧的，重扫一次
+        // 列表可能是旧的，重扫一次再下结论
         DispatchQueue.global(qos: .userInitiated).async {
             let fresh = Agent.shared.generateAppList()
             DispatchQueue.main.async {
@@ -286,34 +292,26 @@ extension AppListViewController {
                 preferredStyle: .alert
             )
             alert.addAction(UIAlertAction(title: "知道了", style: .cancel))
-            present(alert, animated: true)
+            presentOnTop(alert)
             return
         }
+
         let alert = UIAlertController(
             title: meta.trackName,
             message: """
             \(meta.bundleId) · \(meta.version)
 
-            设备上没有装这个 App。砸壳对象是 /var/containers/Bundle/Application 里的 bundle，没装就没有东西可砸。
-            去 App Store 点「获取」，装完切回来会自动开始。
+            设备上没装这个 App，没有东西可砸。去 App Store 装好，回来重新复制一次链接就行 —— 不会自动开始，也不会反复弹同一个 App。
             """,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "去 App Store", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: "去 App Store", style: .default) { _ in
             AppStoreLink.shared.openInAppStore(trackId: meta.trackId)
-            self?.beginWaiting(meta)
         })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        present(alert, animated: true)
-    }
-
-    private func beginWaiting(_ meta: AppStoreLookupResult) {
-        guard !AppStoreInstallWatcher.shared.isWatching else { return }
-        SPIndicator.present(title: "等待安装", message: "装好自动开始", preset: .done)
-        AppStoreInstallWatcher.shared.watch(meta) { [weak self] apps, app in
-            guard let self = self else { return }
-            self.origDataSource = apps
-            self.startDecrypt(app)
-        }
+        alert.addAction(UIAlertAction(title: "不砸了", style: .cancel) { _ in
+            // 保留去重记录：剪贴板里还是这条链接的话，下次点链接按钮走输入框
+            AppStoreLinkSession.skipCurrent()
+        })
+        presentOnTop(alert)
     }
 }
