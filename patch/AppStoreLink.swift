@@ -1,0 +1,302 @@
+//
+//  AppStoreLink.swift
+//  iridium
+//
+//  复制 App Store 链接 → 直接砸壳
+//  依赖：AppListProto / SPIndicator / UIKit
+//
+
+import AppListProto
+import SPIndicator
+import UIKit
+
+// MARK: - 查询结果
+
+struct AppStoreLookupResult {
+    let trackId: Int
+    let bundleId: String
+    let trackName: String
+    let version: String
+    let artworkUrl: URL?
+}
+
+enum AppStoreLinkError: LocalizedError {
+    case badLink
+    case lookupEmpty(Int)
+    case network(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .badLink:
+            return "链接里找不到 /id 数字"
+        case .lookupEmpty(let id):
+            return "iTunes 查不到 id \(id)，该区可能已下架"
+        case .network(let message):
+            return "网络错误：\(message)"
+        }
+    }
+}
+
+// MARK: - 链接解析 + iTunes 查询
+
+final class AppStoreLink {
+    static let shared = AppStoreLink()
+    private init() {}
+
+    /// apps.apple.com/cn/app/xxx/id123456789、itms-apps://…/id123、纯数字、?id=123 都能认
+    func trackId(from text: String) -> Int? {
+        let patterns = [
+            #"/id(\d{5,})"#,
+            #"[?&]id=(\d{5,})"#,
+            #"^\s*(\d{6,})\s*$"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..., in: text)
+            guard let match = regex.firstMatch(in: text, range: range),
+                  let sub = Range(match.range(at: 1), in: text),
+                  let value = Int(text[sub])
+            else { continue }
+            return value
+        }
+        return nil
+    }
+
+    /// 中国区查不到自动回退美国区
+    func lookup(
+        trackId: Int,
+        country: String = "cn",
+        completion: @escaping (Result<AppStoreLookupResult, Error>) -> Void
+    ) {
+        var components = URLComponents(string: "https://itunes.apple.com/lookup")!
+        components.queryItems = [
+            URLQueryItem(name: "id", value: "\(trackId)"),
+            URLQueryItem(name: "country", value: country),
+            URLQueryItem(name: "entity", value: "software"),
+        ]
+        guard let url = components.url else {
+            DispatchQueue.main.async { completion(.failure(AppStoreLinkError.badLink)) }
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            func fail(_ error: Error) {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+            guard let self = self else { return }
+            if let error = error {
+                return fail(AppStoreLinkError.network(error.localizedDescription))
+            }
+            guard let data = data,
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let results = root["results"] as? [[String: Any]]
+            else {
+                return fail(AppStoreLinkError.network("响应不是合法 JSON"))
+            }
+            guard let first = results.first,
+                  let bundleId = first["bundleId"] as? String
+            else {
+                if country != "us" {
+                    self.lookup(trackId: trackId, country: "us", completion: completion)
+                } else {
+                    fail(AppStoreLinkError.lookupEmpty(trackId))
+                }
+                return
+            }
+            let result = AppStoreLookupResult(
+                trackId: trackId,
+                bundleId: bundleId,
+                trackName: first["trackName"] as? String ?? bundleId,
+                version: first["version"] as? String ?? "?",
+                artworkUrl: (first["artworkUrl512"] as? String).flatMap(URL.init(string:))
+            )
+            DispatchQueue.main.async { completion(.success(result)) }
+        }
+        .resume()
+    }
+
+    func openInAppStore(trackId: Int) {
+        let candidates = [
+            "itms-apps://itunes.apple.com/app/id\(trackId)",
+            "https://apps.apple.com/app/id\(trackId)",
+        ]
+        for candidate in candidates {
+            guard let url = URL(string: candidate) else { continue }
+            if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                return
+            }
+        }
+    }
+}
+
+// MARK: - 装完自动砸壳的等待器
+
+final class AppStoreInstallWatcher: NSObject {
+    static let shared = AppStoreInstallWatcher()
+
+    private var timer: DispatchSourceTimer?
+    private var meta: AppStoreLookupResult?
+    private var onReady: (([AppListElement], AppListElement) -> Void)?
+
+    var isWatching: Bool { meta != nil }
+
+    func watch(_ meta: AppStoreLookupResult, onReady: @escaping ([AppListElement], AppListElement) -> Void) {
+        stop()
+        self.meta = meta
+        self.onReady = onReady
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(tick),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 3, repeating: 3, leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in self?.tick() }
+        timer.resume()
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.cancel()
+        timer = nil
+        meta = nil
+        onReady = nil
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func tick() {
+        guard let meta = meta else { return }
+        let apps = Agent.shared.generateAppList()
+        guard let app = apps.first(where: {
+            $0.bundleIdentifier.caseInsensitiveCompare(meta.bundleId) == .orderedSame
+        }) else { return }
+        let completion = onReady
+        stop()
+        DispatchQueue.main.async { completion?(apps, app) }
+    }
+}
+
+// MARK: - AppListViewController 入口
+
+extension AppListViewController {
+    /// 在 viewDidLoad 末尾调用一次
+    func installAppStoreLinkEntry() {
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "link"),
+            style: .plain,
+            target: self,
+            action: #selector(promptForAppStoreLink)
+        )
+    }
+
+    @objc func promptForAppStoreLink() {
+        let pasteboardText = UIPasteboard.general.string ?? ""
+        if AppStoreLink.shared.trackId(from: pasteboardText) != nil {
+            resolveAndDecrypt(text: pasteboardText)
+            return
+        }
+        let alert = UIAlertController(
+            title: "App Store 链接",
+            message: "粘贴 apps.apple.com/.../id123456789，直接输入数字 ID 也行",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "https://apps.apple.com/cn/app/id123456789"
+            field.keyboardType = .URL
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "砸壳", style: .default) { [weak self, weak alert] _ in
+            self?.resolveAndDecrypt(text: alert?.textFields?.first?.text ?? "")
+        })
+        present(alert, animated: true)
+    }
+
+    func resolveAndDecrypt(text: String) {
+        guard let trackId = AppStoreLink.shared.trackId(from: text) else {
+            SPIndicator.present(title: "解析失败", message: "没有 /id 数字", preset: .error)
+            return
+        }
+        AppStoreLink.shared.lookup(trackId: trackId) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .failure(let error):
+                SPIndicator.present(title: "查询失败", message: error.localizedDescription, preset: .error)
+            case .success(let meta):
+                self.matchOrAskInstall(meta)
+            }
+        }
+    }
+
+    private func matchOrAskInstall(_ meta: AppStoreLookupResult) {
+        if let app = installedApp(matching: meta.bundleId) {
+            startDecrypt(app)
+            return
+        }
+        // 列表可能是旧的，重扫一次
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fresh = Agent.shared.generateAppList()
+            DispatchQueue.main.async {
+                self.origDataSource = fresh
+                if let app = fresh.first(where: {
+                    $0.bundleIdentifier.caseInsensitiveCompare(meta.bundleId) == .orderedSame
+                }) {
+                    self.startDecrypt(app)
+                } else {
+                    self.askToInstall(meta)
+                }
+            }
+        }
+    }
+
+    private func installedApp(matching bundleId: String) -> AppListElement? {
+        origDataSource.first {
+            $0.bundleIdentifier.caseInsensitiveCompare(bundleId) == .orderedSame
+        }
+    }
+
+    private func startDecrypt(_ app: AppListElement) {
+        SPIndicator.present(title: "开始砸壳", message: app.localizedName, preset: .done)
+        dispatchDecrypt(app: app)
+    }
+
+    private func askToInstall(_ meta: AppStoreLookupResult) {
+        let alert = UIAlertController(
+            title: meta.trackName,
+            message: """
+            \(meta.bundleId) · \(meta.version)
+
+            设备上没有装这个 App。砸壳对象是 /var/containers/Bundle/Application 里的 bundle，没装就没有东西可砸。
+            去 App Store 点「获取」，装完切回来会自动开始。
+            """,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "去 App Store", style: .default) { [weak self] _ in
+            AppStoreLink.shared.openInAppStore(trackId: meta.trackId)
+            self?.beginWaiting(meta)
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func beginWaiting(_ meta: AppStoreLookupResult) {
+        guard !AppStoreInstallWatcher.shared.isWatching else { return }
+        SPIndicator.present(title: "等待安装", message: "装好自动开始", preset: .done)
+        AppStoreInstallWatcher.shared.watch(meta) { [weak self] apps, app in
+            guard let self = self else { return }
+            self.origDataSource = apps
+            self.startDecrypt(app)
+        }
+    }
+}

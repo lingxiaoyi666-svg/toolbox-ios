@@ -1,0 +1,82 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    name: xcodebuild archive -> ipa (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-14]
+
+    steps:
+      - name: Checkout patch repo
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream Iridium source
+        run: |
+          git clone --depth 1 https://github.com/pxx917144686/Iridium_iOS.git src
+          echo "--- 上游头部 ---"
+          ls src
+          git -C src log --oneline -1
+
+      - name: Apply App Store link patch
+        run: |
+          set -euo pipefail
+          APPDIR=src/Application/iridium/Interface/AppListViewController
+          test -d "$APPDIR" || { echo "::error::上游目录结构变了"; exit 1; }
+          cp patch/AppStoreLink.swift "$APPDIR/"
+          cp patch/AppListViewController.swift "$APPDIR/"
+          cp patch/prepare.ipa.sh src/Workflow/prepare.ipa.sh
+          # 整份覆盖 pbxproj（比 git apply 稳，上游自 2024-06 未再变更）
+          cp patch/iridium.project.pbxproj src/Application/iridium.xcodeproj/project.pbxproj
+          cd src
+          echo "--- pbxproj 注册点 ---"
+          grep -n 'AppStoreLink' Application/iridium.xcodeproj/project.pbxproj
+          echo "--- 入口调用点 ---"
+          grep -n 'installAppStoreLinkEntry' Application/iridium/Interface/AppListViewController/AppListViewController.swift
+
+      - name: Install ldid
+        run: |
+          brew install ldid || brew upgrade ldid || true
+          which ldid && ldid -v 2>&1 | head -3 || true
+
+      - name: Build unsigned IPA
+        run: |
+          chmod +x src/Workflow/prepare.ipa.sh src/Workflow/prepare.app.sh src/AuxiliaryAgent/build.sh
+          bash src/Workflow/prepare.ipa.sh
+
+      - name: Verify ipa content
+        if: always()
+        run: |
+          set -uo pipefail
+          IPA=$(cat src/build/ipa/ipa-path.txt 2>/dev/null || true)
+          if [ -z "$IPA" ] || [ ! -f "$IPA" ]; then
+            echo "::warning::没产出 ipa，贴构建日志尾部"
+            tail -80 src/build/ipa/xcodebuild.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "--- ipa 条目抽样 ---"
+          unzip -l "$IPA" | head -20
+          echo "--- 关键组件 ---"
+          for p in iridium AuxiliaryAgent fouldecrypt.tfp0 fouldecrypt.krw fouldecrypt.kernrw Info.plist; do
+            if unzip -l "$IPA" | grep -q "Payload/iridium.app/$p"; then echo "  OK   $p"; else echo "  ::warning::缺 $p"; fi
+          done
+          echo "--- entitlements ---"
+          unzip -p "$IPA" "Payload/iridium.app/iridium" > /tmp/iridium.bin
+          ldid -e /tmp/iridium.bin || true
+          echo "### $(basename "$IPA") · $(du -h "$IPA" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: iridium-unsigned-ipa-${{ matrix.os }}
+          path: src/build/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 30

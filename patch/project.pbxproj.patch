@@ -1,0 +1,36 @@
+diff --git a/Application/iridium.xcodeproj/project.pbxproj b/Application/iridium.xcodeproj/project.pbxproj
+index a33bcfc..125b21e 100644
+--- a/Application/iridium.xcodeproj/project.pbxproj
++++ b/Application/iridium.xcodeproj/project.pbxproj
+@@ -10,6 +10,7 @@
+ 		506ACD7E2787531F0007ACAA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506ACD7D2787531F0007ACAA /* AppDelegate.swift */; };
+ 		506ACD802787531F0007ACAA /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506ACD7F2787531F0007ACAA /* SceneDelegate.swift */; };
+ 		506ACD822787531F0007ACAA /* AppListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506ACD812787531F0007ACAA /* AppListViewController.swift */; };
++		50A5C0012900000000000001 /* AppStoreLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50A5C0022900000000000002 /* AppStoreLink.swift */; };
+ 		506ACD852787531F0007ACAA /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 506ACD832787531F0007ACAA /* Main.storyboard */; };
+ 		506ACD872787531F0007ACAA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 506ACD862787531F0007ACAA /* Assets.xcassets */; };
+ 		506ACD8A2787531F0007ACAA /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 506ACD882787531F0007ACAA /* LaunchScreen.storyboard */; };
+@@ -37,6 +38,7 @@
+ 		506ACD7D2787531F0007ACAA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+ 		506ACD7F2787531F0007ACAA /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+ 		506ACD812787531F0007ACAA /* AppListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppListViewController.swift; sourceTree = "<group>"; };
++		50A5C0022900000000000002 /* AppStoreLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreLink.swift; sourceTree = "<group>"; };
+ 		506ACD842787531F0007ACAA /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+ 		506ACD862787531F0007ACAA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+ 		506ACD892787531F0007ACAA /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+@@ -115,6 +117,7 @@
+ 			children = (
+ 				50DC8AD62787715F003F4A31 /* AppCell.swift */,
+ 				506ACD812787531F0007ACAA /* AppListViewController.swift */,
++				50A5C0022900000000000002 /* AppStoreLink.swift */,
+ 				50DC8AD427877152003F4A31 /* AppListViewController+TableView.swift */,
+ 				50DC8AD82787717D003F4A31 /* AppListViewController+SearchBar.swift */,
+ 			);
+@@ -257,6 +260,7 @@
+ 			files = (
+ 				50DC8AD72787715F003F4A31 /* AppCell.swift in Sources */,
+ 				506ACD822787531F0007ACAA /* AppListViewController.swift in Sources */,
++				50A5C0012900000000000001 /* AppStoreLink.swift in Sources */,
+ 				50DC8AD92787717D003F4A31 /* AppListViewController+SearchBar.swift in Sources */,
+ 				506ACD7E2787531F0007ACAA /* AppDelegate.swift in Sources */,
+ 				50DC8AD527877152003F4A31 /* AppListViewController+TableView.swift in Sources */,
