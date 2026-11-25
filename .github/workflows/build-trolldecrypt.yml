@@ -1,0 +1,120 @@
+name: Build TrollDecrypt (App Store link)
+
+on:
+  push:
+    branches: ['td-link']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: theos stage -> tipa
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout patch repo
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream TrollDecrypt
+        run: |
+          git clone --depth 1 https://github.com/donato-fiore/TrollDecrypt.git src
+          git -C src log --oneline -1
+
+      - name: Apply App Store link patch
+        run: |
+          set -euo pipefail
+          cp patch-td/TDAppStoreLink.h src/
+          cp patch-td/TDAppStoreLink.m src/
+          cp patch-td/TDApplicationListViewController.m src/
+          # runner 的 Xcode 没有 16.5 SDK，交给 theos 选最新
+          sed -i '' 's/clang:16\.5:/clang:latest:/' src/Makefile
+          echo "--- Makefile TARGET ---"
+          grep -n 'TARGET :=' src/Makefile
+          echo "--- 新入口落地检查 ---"
+          grep -n 'appStoreLinkButton\|_checkClipboardForLink\|TDAppStoreLink' src/TDApplicationListViewController.m | head -8
+
+      - name: Install toolchain
+        run: |
+          brew install ldid dpkg xz || true
+          export THEOS="$RUNNER_TEMP/theos"
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
+          ls "$THEOS"
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Theos stage build
+        run: |
+          cd src
+          make stage FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless 2>&1 | tail -60 || {
+            echo "::error::stage 失败，贴完整日志尾部"
+            exit 1
+          }
+          echo "--- staging ---"
+          find .theos/_ -maxdepth 3 -type d | head -20
+
+      - name: Package tipa
+        run: |
+          set -euo pipefail
+          APP=$(find src/.theos/_ -maxdepth 3 -name 'TrollDecrypt.app' -type d | head -1)
+          [ -n "$APP" ] || { echo "::error::没找到 TrollDecrypt.app"; find src/.theos -maxdepth 4 -type d; exit 1; }
+          echo "APP=$APP"
+          rm -rf /tmp/pk && mkdir -p /tmp/pk/Payload
+          cp -a "$APP" /tmp/pk/Payload/
+          cd /tmp/pk
+          name="TrollDecrypt.link.$(date +%s).tipa"
+          python3 -c "
+          import os, zipfile
+          root='Payload'; dirs=[]; files=[]
+          for r,d,f in os.walk(root):
+              d.sort(); f.sort(); dirs.append(r)
+              files += [os.path.join(r,x) for x in f]
+          z=zipfile.ZipFile('$name','w',zipfile.ZIP_DEFLATED,compresslevel=9)
+          for d in dirs: z.writestr(d+'/', b'')
+          for p in files: z.write(p, p)
+          z.close(); print('entries:', len(dirs)+len(files))
+          "
+          echo "$name" > tipa-path.txt
+          ls -la
+
+      - name: Verify
+        if: always()
+        run: |
+          set -uo pipefail
+          cd /tmp/pk 2>/dev/null || exit 1
+          name=$(cat tipa-path.txt 2>/dev/null || true)
+          [ -f "$name" ] || { echo "::error::没产出 tipa"; exit 1; }
+          unzip -l "$name" | head -25
+          echo "--- 主二进制 entitlements（必须含 task_for_pid-allow）---"
+          unzip -p "$name" Payload/TrollDecrypt.app/TrollDecrypt > /tmp/td.bin
+          ldid -e /tmp/td.bin || true
+          echo "--- 链接入口文案抽查 ---"
+          strings /tmp/td.bin | grep -m3 'apps.apple.com\|App Store 链接\|还没安装' || echo "::warning::没搜到新文案"
+          echo "### $(basename "$name") · $(du -h "$name" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trolldecrypt-link-tipa
+          path: /tmp/pk/*.tipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd /tmp/pk
+          name=$(cat tipa-path.txt)
+          cp "$name" /tmp/TrollDecrypt.link.tipa
+          gh release delete td-link-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create td-link-latest /tmp/TrollDecrypt.link.tipa \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TrollDecrypt link build ($(date -u +%Y-%m-%d))" \
+            --notes "TrollDecrypt + App Store 链接直砸。TrollStore 安装；需要 task_for_pid-allow，非 TrollStore 签名装法用不了。"
+          gh release view td-link-latest --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)  \(.size) B  \(.url)"'
