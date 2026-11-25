@@ -1,0 +1,69 @@
+name: Build BiliPure dylib
+
+on:
+  push:
+    branches: ['bilipure']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: theos -> dylib
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          brew install ldid dpkg xz || true
+          export THEOS="$RUNNER_TEMP/theos"
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build
+        run: |
+          set -o pipefail
+          make FINALPACKAGE=1 2>&1 | tail -60
+          echo "--- dylib ---"
+          find .theos -name '*.dylib' -type f | head -10
+
+      - name: Verify
+        run: |
+          set -uo pipefail
+          DYLIB=$(find .theos -name 'BiliPure.dylib' -type f | head -1)
+          [ -n "$DYLIB" ] || { echo "::error::没产出 BiliPure.dylib"; exit 1; }
+          echo "DYLIB=$DYLIB ($(du -h "$DYLIB" | cut -f1))"
+          lipo -info "$DYLIB"
+          otool -L "$DYLIB" | head -15
+          echo "--- hook 目标符号抽查 ---"
+          strings "$DYLIB" | grep -m8 'BFCSplashManager\|BFCPopper\|BBAdCard\|TheseusEndPageAdCard\|showSplashWithStyle' || echo "::warning::符号没搜到"
+          cp "$DYLIB" /tmp/BiliPure.dylib
+          ls -la /tmp/BiliPure.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliPure-dylib
+          path: /tmp/BiliPure.dylib
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete bilipure-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create bilipure-latest /tmp/BiliPure.dylib \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "BiliPure dylib ($(date -u +%Y-%m-%d))" \
+            --notes "bilibili 9.21.0 净化插件 dylib。签名注入用。"
+          gh release view bilipure-latest --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)  \(.size) B"'
