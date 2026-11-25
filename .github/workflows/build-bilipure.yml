@@ -41,6 +41,8 @@ jobs:
           [ -n "$DYLIB" ] || { echo "::error::没产出 BiliPure.dylib"; exit 1; }
           echo "DYLIB=$DYLIB ($(du -h "$DYLIB" | cut -f1))"
           lipo -info "$DYLIB"
+          echo "--- install name（必须是 @executable_path/Frameworks/BiliPure.dylib）---"
+          otool -D "$DYLIB"
           otool -L "$DYLIB" | head -15
           echo "--- hook 目标符号抽查 ---"
           strings "$DYLIB" | grep -m8 'BFCSplashManager\|BFCPopper\|BBAdCard\|TheseusEndPageAdCard\|showSplashWithStyle' || echo "::warning::符号没搜到"

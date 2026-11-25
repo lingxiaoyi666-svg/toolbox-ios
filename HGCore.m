@@ -1,6 +1,11 @@
 #import "HGCore.h"
 #import <objc/runtime.h>
 #import <string.h>
+#import <signal.h>
+#import <execinfo.h>
+#import <fcntl.h>
+#import <unistd.h>
+#import <stdio.h>
 
 #pragma mark - 开关
 
@@ -35,7 +40,23 @@ void HGSetOn(NSString *key, BOOL value) {
     @synchronized (gCache) { gCache[key] = @(value); }
 }
 
-#pragma mark - 日志
+#pragma mark - 日志（写在 App 沙盒 Documents 里，非越狱也可写）
+
+NSString *HGLogPath(void) {
+    static NSString *p = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        @try {
+            NSArray *dirs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+            if (dirs.count) {
+                p = [dirs.firstObject stringByAppendingPathComponent:@"BiliPure.log"];
+            }
+        } @catch (NSException *e) {}
+        if (!p) p = [NSTemporaryDirectory() stringByAppendingPathComponent:@"BiliPure.log"];
+    });
+    return p;
+}
+
 void HGLog(NSString *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -43,24 +64,60 @@ void HGLog(NSString *fmt, ...) {
     va_end(ap);
     NSLog(@"[BiliPure] %@", msg);
 
-    static NSString *logPath = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        logPath = @"/var/mobile/Library/Preferences/com.hg.bilipure.log";
-    });
     @try {
-        NSFileManager *fm = [NSFileManager defaultManager];
-        if (![fm fileExistsAtPath:logPath]) {
-            [fm createFileAtPath:logPath contents:nil attributes:nil];
-        }
-        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath];
-        [fh seekToEndOfFile];
-        NSDateFormatter *df = [[NSDateFormatter alloc] init];
-        df.dateFormat = @"HH:mm:ss.SSS";
+        static NSDateFormatter *df = nil;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            df = [[NSDateFormatter alloc] init];
+            df.dateFormat = @"HH:mm:ss.SSS";
+        });
+
         NSString *line = [NSString stringWithFormat:@"%@ %@\n", [df stringFromDate:[NSDate date]], msg];
-        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *path = HGLogPath();
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:path]) {
+            [fm createFileAtPath:path contents:data attributes:nil];
+            return;
+        }
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!fh) return;
+        [fh seekToEndOfFile];
+        [fh writeData:data];
         [fh closeFile];
     } @catch (NSException *e) {}
+}
+
+#pragma mark - 崩溃捕获
+
+static void HGSignalHandler(int sig) {
+    int fd = -1;
+    @try {
+        const char *path = HGLogPath().UTF8String;
+        fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    } @catch (NSException *e) {}
+
+    if (fd >= 0) {
+        char head[96];
+        int n = snprintf(head, sizeof(head), "\n=== BiliPure crash: signal %d ===\n", sig);
+        if (n > 0) write(fd, head, (size_t)n);
+
+        void *frames[48];
+        int cnt = backtrace(frames, 48);
+        backtrace_symbols_fd(frames, cnt, fd);
+        close(fd);
+    }
+
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void HGInstallCrashHandler(void) {
+    int sigs[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE, SIGTRAP};
+    for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) {
+        signal(sigs[i], HGSignalHandler);
+    }
 }
 
 #pragma mark - 广告类判定（带线性缓存）
@@ -73,10 +130,8 @@ static int gIdx = 0;
 static BOOL HGRuleMatchesAd(const char *n) {
     if (!n) return NO;
 
-    // 明确是广告模块的类
     if (strncmp(n, "BBAd", 4) == 0) return YES;
     if (strncmp(n, "_TtC", 4) == 0) {
-        // Swift 类名形如 _TtC10BBAdCardV211AdCardModel，模块名里带 Ad
         if (strstr(n, "BBAdCard")) return YES;
         if (strstr(n, "BBAdSplash")) return YES;
         if (strstr(n, "BBAdLiveBigCard")) return YES;
@@ -102,7 +157,7 @@ static BOOL HGRuleMatchesAd(const char *n) {
 BOOL HGIsAdClass(Class cls) {
     if (!cls) return NO;
 
-    for (int i = 0; i < gCnt; i++) {
+    for (int i = 0; i < gCnt && i < 512; i++) {
         if (gCls[i] == cls) return gVal[i];
     }
 
@@ -110,13 +165,14 @@ BOOL HGIsAdClass(Class cls) {
     BOOL ad = HGRuleMatchesAd(n);
 
     if (gCnt < 512) {
-        gCls[gCnt] = cls;
-        gVal[gCnt] = ad;
-        gCnt++;
+        int slot = gCnt;
+        gCnt = slot + 1 > 512 ? 512 : slot + 1;
+        if (slot < 512) { gCls[slot] = cls; gVal[slot] = ad; }
     } else {
-        gCls[gIdx] = cls;
-        gVal[gIdx] = ad;
-        gIdx = (gIdx + 1) % 512;
+        int slot = gIdx;
+        gCls[slot] = cls;
+        gVal[slot] = ad;
+        gIdx = (slot + 1) % 512;
     }
     return ad;
 }
