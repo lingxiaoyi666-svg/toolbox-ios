@@ -9,7 +9,6 @@
 #import <string.h>
 #import <unistd.h>
 
-NS_ASSUME_NONNULL_BEGIN
 
 static BOOL gSafeMode = NO;
 
@@ -251,5 +250,3 @@ static void HGBiliPureInit(void) {
         });
     }
 }
-
-NS_ASSUME_NONNULL_END
