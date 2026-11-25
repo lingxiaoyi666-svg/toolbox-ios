@@ -147,7 +147,9 @@ static NSArray *HGPrependEntry(NSArray *datas) {
 - (void)setDatas:(NSArray *)datas {
     NSArray *d = datas;
     @try {
-        if ([self isKindOfClass:NSClassFromString(@"BBPhoneSettingMainVC")]) {
+        Class selfCls = object_getClass(self);
+        const char *cn = selfCls ? class_getName(selfCls) : "";
+        if (cn && strcmp(cn, "BBPhoneSettingMainVC") == 0) {
             d = HGPrependEntry(datas);
         }
     } @catch (NSException *e) {}
