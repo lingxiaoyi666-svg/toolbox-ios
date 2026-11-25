@@ -29,12 +29,15 @@ jobs:
           cp patch-td/TDAppStoreLink.h src/
           cp patch-td/TDAppStoreLink.m src/
           cp patch-td/TDApplicationListViewController.m src/
+          cp 'patch-td/LSBundleProxy+TrollDecrypt.m' src/Extensions/
+          cp patch-td/Makefile src/Makefile
           # runner 的 Xcode 没有 16.5 SDK，交给 theos 选最新
           sed -i '' 's/clang:16\.5:/clang:latest:/' src/Makefile
-          echo "--- Makefile TARGET ---"
-          grep -n 'TARGET :=' src/Makefile
+          echo "--- Makefile ---"
+          grep -n 'TARGET :=\|dynamic_lookup\|PRIVATE' src/Makefile
           echo "--- 新入口落地检查 ---"
           grep -c 'appStoreLinkButton\|_checkClipboardForLink\|TDAppStoreLink' src/TDApplicationListViewController.m
+          grep -c 'launchJobRoutine' src/Extensions/LSBundleProxy+TrollDecrypt.m
 
       - name: Install toolchain
         run: |
