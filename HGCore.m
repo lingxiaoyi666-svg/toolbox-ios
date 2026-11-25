@@ -4,13 +4,14 @@
 
 #pragma mark - 开关
 
-BOOL HGOn(NSString *key) {
-    static NSMutableDictionary *cache = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ cache = [NSMutableDictionary dictionary]; });
+static NSMutableDictionary *gCache;
+static dispatch_once_t gOnce;
 
-    @synchronized (cache) {
-        NSNumber *hit = cache[key];
+BOOL HGOn(NSString *key) {
+    dispatch_once(&gOnce, ^{ gCache = [NSMutableDictionary dictionary]; });
+
+    @synchronized (gCache) {
+        NSNumber *hit = gCache[key];
         if (hit) return hit.boolValue;
     }
 
@@ -22,12 +23,19 @@ BOOL HGOn(NSString *key) {
         else if ([d objectForKey:key] != nil) v = [d boolForKey:key];
     } @catch (NSException *e) {}
 
-    @synchronized (cache) { cache[key] = @(v); }
+    @synchronized (gCache) { gCache[key] = @(v); }
     return v;
 }
 
-#pragma mark - 日志
+void HGSetOn(NSString *key, BOOL value) {
+    @try {
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        [d setBool:value forKey:[@"HGP_" stringByAppendingString:key]];
+    } @catch (NSException *e) {}
+    @synchronized (gCache) { gCache[key] = @(value); }
+}
 
+#pragma mark - 日志
 void HGLog(NSString *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

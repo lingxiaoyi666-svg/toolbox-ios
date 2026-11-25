@@ -16,6 +16,9 @@ BOOL HGIsAdClass(Class cls);
 /// 打印各开关到日志
 void HGDumpConfig(void);
 
+/// 写开关（同时清缓存）
+void HGSetOn(NSString *key, BOOL value);
+
 #ifdef __cplusplus
 }
 #endif
