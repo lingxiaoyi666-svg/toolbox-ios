@@ -5,15 +5,14 @@ on:
     branches: ['**']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   ipa:
-    name: xcodebuild archive -> ipa (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: xcodebuild archive -> ipa
+    runs-on: macos-15
     timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, macos-14]
 
     steps:
       - name: Checkout patch repo
@@ -22,7 +21,6 @@ jobs:
       - name: Fetch upstream Iridium source
         run: |
           git clone --depth 1 https://github.com/pxx917144686/Iridium_iOS.git src
-          echo "--- 上游头部 ---"
           ls src
           git -C src log --oneline -1
 
@@ -34,13 +32,11 @@ jobs:
           cp patch/AppStoreLink.swift "$APPDIR/"
           cp patch/AppListViewController.swift "$APPDIR/"
           cp patch/prepare.ipa.sh src/Workflow/prepare.ipa.sh
-          # 整份覆盖 pbxproj（比 git apply 稳，上游自 2024-06 未再变更）
           cp patch/iridium.project.pbxproj src/Application/iridium.xcodeproj/project.pbxproj
-          cd src
           echo "--- pbxproj 注册点 ---"
-          grep -n 'AppStoreLink' Application/iridium.xcodeproj/project.pbxproj
+          grep -n 'AppStoreLink' src/Application/iridium.xcodeproj/project.pbxproj
           echo "--- 入口调用点 ---"
-          grep -n 'installAppStoreLinkEntry' Application/iridium/Interface/AppListViewController/AppListViewController.swift
+          grep -n 'installAppStoreLinkEntry' "$APPDIR/AppListViewController.swift"
 
       - name: Install ldid
         run: |
@@ -62,21 +58,32 @@ jobs:
             tail -80 src/build/ipa/xcodebuild.log 2>/dev/null || true
             exit 1
           fi
-          echo "--- ipa 条目抽样 ---"
           unzip -l "$IPA" | head -20
-          echo "--- 关键组件 ---"
           for p in iridium AuxiliaryAgent fouldecrypt.tfp0 fouldecrypt.krw fouldecrypt.kernrw Info.plist; do
-            if unzip -l "$IPA" | grep -q "Payload/iridium.app/$p"; then echo "  OK   $p"; else echo "  ::warning::缺 $p"; fi
+            if unzip -l "$IPA" | grep -q "Payload/iridium.app/$p"; then echo "  OK   $p"; else echo "::warning::缺 $p"; fi
           done
-          echo "--- entitlements ---"
           unzip -p "$IPA" "Payload/iridium.app/iridium" > /tmp/iridium.bin
           ldid -e /tmp/iridium.bin || true
           echo "### $(basename "$IPA") · $(du -h "$IPA" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload IPA
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iridium-unsigned-ipa-${{ matrix.os }}
+          name: iridium-unsigned-ipa
           path: src/build/ipa/*.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish to release (镜像可直连下载)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete ipa-latest --yes --cleanup-tag 2>/dev/null || true
+          IPA=$(ls src/build/ipa/*.ipa | head -1)
+          cp "$IPA" /tmp/iridium.unsigned.ipa
+          gh release create ipa-latest /tmp/iridium.unsigned.ipa \
+            --title "Iridium unsigned ipa ($(date -u +%Y-%m-%d))" \
+            --notes "App Store 链接直砸改造版，未签名。装法：TrollStore / 全能签 / Sideloadly 重签。"
+          gh release view ipa-latest --json assets --jq '.assets[] | "\(.name)  \(.size) B  \(.url)"'
