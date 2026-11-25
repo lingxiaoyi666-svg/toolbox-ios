@@ -44,6 +44,18 @@ jobs:
           echo "--- install name（必须是 @executable_path/Frameworks/BiliPure.dylib）---"
           otool -D "$DYLIB"
           otool -L "$DYLIB" | head -15
+          echo "--- 断言 1：install name 不能是越狱路径 ---"
+          if otool -D "$DYLIB" | grep -q '/Library/MobileSubstrate'; then
+            echo "::error::install name 仍是越狱路径 /Library/MobileSubstrate/...，非越狱注入会闪退"
+            exit 1
+          fi
+          echo "--- 断言 2：不允许依赖 substrate（这是闪退真因）---"
+          if otool -L "$DYLIB" | grep -qi 'substrate'; then
+            echo "::error::dylib 仍链接 CydiaSubstrate/libsubstrate，非越狱设备没有该库，启动即闪退"
+            otool -L "$DYLIB" | grep -i substrate
+            exit 1
+          fi
+          echo "依赖检查通过：无 substrate"
           echo "--- hook 目标符号抽查 ---"
           strings "$DYLIB" | grep -m8 'BFCSplashManager\|BFCPopper\|BBAdCard\|TheseusEndPageAdCard\|showSplashWithStyle' || echo "::warning::符号没搜到"
           cp "$DYLIB" /tmp/BiliPure.dylib
