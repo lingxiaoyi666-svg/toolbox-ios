@@ -1,6 +1,7 @@
 #import "HGSettings.h"
 #import "HGCore.h"
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 
 #pragma mark - 规格表
 
@@ -34,7 +35,7 @@ static NSArray<NSDictionary *> *HGSpecs(void) {
         @{@"header": @"实验功能", @"items": @[
               @{@"key": @"watermark", @"name": @"去水印下载",
                 @"desc": @"下载视频时去掉水印",
-                @"sym": @"arrow.down.to.line.compact", @"color": [UIColor systemIndigoColor]},
+                @"sym": @"arrow.down.to.line", @"color": [UIColor systemIndigoColor]},
               @{@"key": @"danmaku", @"name": @"弹幕增强",
                 @"desc": @"屏蔽词与显示参数调整",
                 @"sym": @"text.bubble.fill", @"color": [UIColor systemPurpleColor]},
