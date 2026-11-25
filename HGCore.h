@@ -13,6 +13,9 @@ void HGLog(NSString *fmt, ...);
 /// 当前是否为广告类（带缓存）
 BOOL HGIsAdClass(Class cls);
 
+/// 打印各开关到日志
+void HGDumpConfig(void);
+
 #ifdef __cplusplus
 }
 #endif
