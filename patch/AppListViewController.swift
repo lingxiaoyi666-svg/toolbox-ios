@@ -36,14 +36,14 @@ class AppListViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        title = "Apps"
+        title = "应用列表"
 
         tableView.delegate = self
         tableView.dataSource = self
         tableView.separatorColor = .clear
         tableView.register(AppCell.self, forCellReuseIdentifier: reuseId)
 
-        searchBar.placeholder = "Search with..."
+        searchBar.placeholder = "搜索应用名或 Bundle ID"
         searchBar.searchBarStyle = .minimal
         searchBar.delegate = self
 
@@ -74,7 +74,7 @@ class AppListViewController: UIViewController {
         defer {
             debugPrint("complete \(#function)")
             SPIndicator.present(
-                title: "App List Updated",
+                title: "应用列表已更新",
                 message: "",
                 preset: .done,
                 haptic: .success

@@ -89,6 +89,19 @@ done
 
 chmod -R 0755 "$TARGET_APP"
 
+# ---------- 5.5 给包内**每一个** Mach-O 都签上 platform-application ----------
+# 原版只签了主二进制：AuxiliaryAgent / fouldecrypt 没 entitlements 的话，
+# 自签安装时 setuid(0) 会失败，agent 的 whoami 拿不到 root，列表就是空的。
+echo "[*] re-signing every Mach-O inside the bundle ..."
+find "$TARGET_APP" -type f -print0 | while IFS= read -r -d '' FILE; do
+    case "$(file "$FILE" 2>/dev/null || true)" in
+        *Mach-O*)
+            "$LDID_BIN" -S"$WORKING_LOCATION/Workflow/Entitlements.plist" "$FILE" 2>/dev/null \
+                && echo "    signed $(basename "$FILE")"
+            ;;
+    esac
+done
+
 # ---------- 6. 打 ipa ----------
 echo "[*] packaging ipa ..."
 cd "$OUT"

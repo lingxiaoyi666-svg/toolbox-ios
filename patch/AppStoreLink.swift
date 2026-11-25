@@ -254,7 +254,7 @@ extension AppListViewController {
                 }) {
                     self.startDecrypt(app)
                 } else {
-                    self.askToInstall(meta)
+                    self.askToInstall(meta, listEmpty: fresh.isEmpty)
                 }
             }
         }
@@ -271,7 +271,24 @@ extension AppListViewController {
         dispatchDecrypt(app: app)
     }
 
-    private func askToInstall(_ meta: AppStoreLookupResult) {
+    private func askToInstall(_ meta: AppStoreLookupResult, listEmpty: Bool = false) {
+        // 列表整个是空的 = 辅助程序没拿到 root，扫不到任何 App。
+        // 这时候说「你没装」是假的，得把真正的原因讲清楚。
+        if listEmpty {
+            let alert = UIAlertController(
+                title: "读不到应用列表",
+                message: """
+                辅助程序没拿到 root 权限，扫不出 /var/containers/Bundle/Application 里的 App。
+                列表空的时候，装没装都会显示「没装」。
+
+                确认用 TrollStore 或带 platform-application 的签名工具安装；装完从后台划掉再重开本 App。
+                """,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "知道了", style: .cancel))
+            present(alert, animated: true)
+            return
+        }
         let alert = UIAlertController(
             title: meta.trackName,
             message: """

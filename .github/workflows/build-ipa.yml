@@ -21,22 +21,32 @@ jobs:
       - name: Fetch upstream Iridium source
         run: |
           git clone --depth 1 https://github.com/pxx917144686/Iridium_iOS.git src
-          ls src
           git -C src log --oneline -1
 
-      - name: Apply App Store link patch
+      - name: Apply patches
         run: |
           set -euo pipefail
-          APPDIR=src/Application/iridium/Interface/AppListViewController
-          test -d "$APPDIR" || { echo "::error::上游目录结构变了"; exit 1; }
-          cp patch/AppStoreLink.swift "$APPDIR/"
-          cp patch/AppListViewController.swift "$APPDIR/"
-          cp patch/prepare.ipa.sh src/Workflow/prepare.ipa.sh
-          cp patch/iridium.project.pbxproj src/Application/iridium.xcodeproj/project.pbxproj
-          echo "--- pbxproj 注册点 ---"
-          grep -n 'AppStoreLink' src/Application/iridium.xcodeproj/project.pbxproj
-          echo "--- 入口调用点 ---"
-          grep -n 'installAppStoreLinkEntry' "$APPDIR/AppListViewController.swift"
+          APP=src/Application/iridium
+          test -d "$APP/Interface/AppListViewController" || { echo "::error::上游目录结构变了"; exit 1; }
+          cp patch/AppStoreLink.swift                        "$APP/Interface/AppListViewController/"
+          cp patch/AppListViewController.swift               "$APP/Interface/AppListViewController/"
+          cp 'patch/AppListViewController+TableView.swift'   "$APP/Interface/AppListViewController/"
+          cp patch/AppDelegate.swift                         "$APP/App/"
+          cp patch/Extension.swift                           "$APP/App/"
+          cp patch/AgentWrapper.swift                        "$APP/Backend/"
+          cp patch/SettingView.swift                         "$APP/Interface/SettingViewController/"
+          cp patch/DecrypterViewController.swift             "$APP/Interface/Decrypter/"
+          cp patch/Main.storyboard                           "$APP/Base.lproj/"
+          cp patch/RootMe.m                                  src/AuxiliaryAgent/AuxiliaryAgent/
+          cp patch/prepare.ipa.sh                            src/Workflow/prepare.ipa.sh
+          cp patch/iridium.project.pbxproj                   src/Application/iridium.xcodeproj/project.pbxproj
+          echo "--- 关键改动落地检查 ---"
+          grep -n 'installAppStoreLinkEntry' "$APP/Interface/AppListViewController/AppListViewController.swift"
+          grep -n 'parent_is_trusted' src/AuxiliaryAgent/AuxiliaryAgent/RootMe.m | head -3
+          echo "--- 中文化命中数 ---"
+          grep -c '应用列表' "$APP/Interface/AppListViewController/AppListViewController.swift" || true
+          grep -c '辅助程序启动失败' "$APP/App/AppDelegate.swift" || true
+          grep -c '砸壳日志' "$APP/Interface/Decrypter/DecrypterViewController.swift" || true
 
       - name: Install ldid
         run: |
@@ -62,8 +72,13 @@ jobs:
           for p in iridium AuxiliaryAgent fouldecrypt.tfp0 fouldecrypt.krw fouldecrypt.kernrw Info.plist; do
             if unzip -l "$IPA" | grep -q "Payload/iridium.app/$p"; then echo "  OK   $p"; else echo "::warning::缺 $p"; fi
           done
-          unzip -p "$IPA" "Payload/iridium.app/iridium" > /tmp/iridium.bin
-          ldid -e /tmp/iridium.bin || true
+          mkdir -p /tmp/x && rm -rf /tmp/x/* && unzip -oq "$IPA" -d /tmp/x
+          echo "--- 主二进制 entitlements ---"
+          ldid -e /tmp/x/Payload/iridium.app/iridium || true
+          echo "--- AuxiliaryAgent entitlements（必须是 platform-application，否则 whoami 拿不到 root）---"
+          ldid -e /tmp/x/Payload/iridium.app/AuxiliaryAgent || true
+          echo "--- 中文文案抽查 ---"
+          strings /tmp/x/Payload/iridium.app/iridium | grep -m5 -E '应用列表|砸壳日志|辅助程序启动失败|读不到应用列表' || echo "::warning::没搜到中文文案"
           echo "### $(basename "$IPA") · $(du -h "$IPA" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
@@ -85,5 +100,5 @@ jobs:
           cp "$IPA" /tmp/iridium.unsigned.ipa
           gh release create ipa-latest /tmp/iridium.unsigned.ipa \
             --title "Iridium unsigned ipa ($(date -u +%Y-%m-%d))" \
-            --notes "App Store 链接直砸改造版，未签名。装法：TrollStore / 全能签 / Sideloadly 重签。"
+            --notes "App Store 链接直砸 + 中文界面 + ipa 安装路径权限修复。未签名，用 TrollStore / 全能签 / Sideloadly 安装。"
           gh release view ipa-latest --json assets --jq '.assets[] | "\(.name)  \(.size) B  \(.url)"'
