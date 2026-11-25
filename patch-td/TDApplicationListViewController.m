@@ -167,8 +167,9 @@ static inline NSUInteger getEffectiveIconFormat(void) {
             [weakSelf _presentSimpleAlert:@"解析失败" message:@"没找到 /id 后面的数字"];
             return;
         }
-        if (weakSelf) { weakSelf->_lastHandledLink = [text copy]; }
-        [weakSelf _lookupAndDecryptTrackId:trackId];
+        TDApplicationListViewController *strongSelf = weakSelf;
+        if (strongSelf) { strongSelf->_lastHandledLink = [text copy]; }
+        [strongSelf _lookupAndDecryptTrackId:trackId];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }

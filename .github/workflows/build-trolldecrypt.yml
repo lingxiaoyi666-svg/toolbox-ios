@@ -34,7 +34,7 @@ jobs:
           echo "--- Makefile TARGET ---"
           grep -n 'TARGET :=' src/Makefile
           echo "--- 新入口落地检查 ---"
-          grep -n 'appStoreLinkButton\|_checkClipboardForLink\|TDAppStoreLink' src/TDApplicationListViewController.m | head -8
+          grep -c 'appStoreLinkButton\|_checkClipboardForLink\|TDAppStoreLink' src/TDApplicationListViewController.m
 
       - name: Install toolchain
         run: |
@@ -43,24 +43,29 @@ jobs:
           git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
           echo "THEOS=$THEOS" >> "$GITHUB_ENV"
           echo "PATH=$THEOS/bin:$PATH" >> "$GITHUB_ENV"
-          ls "$THEOS"
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Theos stage build
         run: |
+          set -o pipefail
           cd src
-          make stage FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless 2>&1 | tail -60 || {
-            echo "::error::stage 失败，贴完整日志尾部"
-            exit 1
-          }
-          echo "--- staging ---"
-          find .theos/_ -maxdepth 3 -type d | head -20
+          make stage FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless 2>&1 | tail -50
+          echo "--- .theos 目录结构 ---"
+          find .theos -maxdepth 4 -type d | head -40
+          echo "--- 所有 .app ---"
+          find . -name '*.app' -type d | head -10
 
       - name: Package tipa
         run: |
           set -euo pipefail
-          APP=$(find src/.theos/_ -maxdepth 3 -name 'TrollDecrypt.app' -type d | head -1)
-          [ -n "$APP" ] || { echo "::error::没找到 TrollDecrypt.app"; find src/.theos -maxdepth 4 -type d; exit 1; }
+          APP=$(find src/.theos -path '*Applications/TrollDecrypt.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            APP=$(find src -name 'TrollDecrypt.app' -type d -not -path '*/obj/*' | head -1)
+          fi
+          if [ -z "$APP" ]; then
+            APP=$(find src -name 'TrollDecrypt.app' -type d | head -1)
+          fi
+          [ -n "$APP" ] || { echo "::error::没找到 TrollDecrypt.app"; exit 1; }
           echo "APP=$APP"
           rm -rf /tmp/pk && mkdir -p /tmp/pk/Payload
           cp -a "$APP" /tmp/pk/Payload/
@@ -84,14 +89,14 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          cd /tmp/pk 2>/dev/null || exit 1
+          cd /tmp/pk 2>/dev/null || { echo "::error::没有产出目录"; exit 1; }
           name=$(cat tipa-path.txt 2>/dev/null || true)
           [ -f "$name" ] || { echo "::error::没产出 tipa"; exit 1; }
           unzip -l "$name" | head -25
           echo "--- 主二进制 entitlements（必须含 task_for_pid-allow）---"
           unzip -p "$name" Payload/TrollDecrypt.app/TrollDecrypt > /tmp/td.bin
           ldid -e /tmp/td.bin || true
-          echo "--- 链接入口文案抽查 ---"
+          echo "--- 新入口文案抽查 ---"
           strings /tmp/td.bin | grep -m3 'apps.apple.com\|App Store 链接\|还没安装' || echo "::warning::没搜到新文案"
           echo "### $(basename "$name") · $(du -h "$name" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
 
@@ -116,5 +121,5 @@ jobs:
           gh release create td-link-latest /tmp/TrollDecrypt.link.tipa \
             --repo "$GITHUB_REPOSITORY" \
             --title "TrollDecrypt link build ($(date -u +%Y-%m-%d))" \
-            --notes "TrollDecrypt + App Store 链接直砸。TrollStore 安装；需要 task_for_pid-allow，非 TrollStore 签名装法用不了。"
+            --notes "TrollDecrypt + App Store 链接直砸。TrollStore 安装；需要 task_for_pid-allow，普通自签/全能签装法用不了。"
           gh release view td-link-latest --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)  \(.size) B  \(.url)"'
